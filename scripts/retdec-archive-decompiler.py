@@ -4,9 +4,8 @@ from __future__ import print_function
 
 import argparse
 import importlib
+import json
 import os
-import re
-import shutil
 import sys
 
 utils = importlib.import_module('retdec-utils')
@@ -64,7 +63,7 @@ class ArchiveDecompiler:
     def __init__(self, _args):
         self.args = parse_args(_args)
 
-        self.decompiler_args = ''
+        self.decompiler_args = []
         self.timeout = 300
         self.tmp_archive = ''
         self.use_json_format = False
@@ -78,10 +77,7 @@ class ArchiveDecompiler:
         One argument required: error message.
         """
         if self.use_json_format:
-            message = re.escape(error)
-            print('{')
-            print('    \'error\' : \'' + message + '\'')
-            print('}')
+            print(json.dumps({'error': error}, indent=4))
         else:
             # Otherwise print in plain text.
             utils.print_error(error)
@@ -90,7 +86,9 @@ class ArchiveDecompiler:
         """Cleans up all temporary files.
         No arguments accepted.
         """
-        shutil.rmtree(self.tmp_archive, ignore_errors=True)
+        if self.tmp_archive:
+            utils.remove_file_forced(self.tmp_archive)
+            self.tmp_archive = ''
 
     def _check_arguments(self):
         if self.args.list_mode:
@@ -143,79 +141,87 @@ class ArchiveDecompiler:
                 return 1
 
             self.tmp_archive = self.library_path + '.a'
-            CmdRunner.run_cmd([EXTRACT, '--best', '--out', self.tmp_archive, self.library_path])
+            _, rc, _ = CmdRunner.run_cmd([EXTRACT, '--best', '--out', self.tmp_archive, self.library_path])
+            if rc != 0:
+                self._cleanup()
+                self._print_error_plain_or_json('Failed to extract archive from Mach-O universal binary.')
+                return 1
             self.library_path = self.tmp_archive
 
-        # Check for thin archives.
-        if utils.has_thin_archive_signature(self.library_path):
-            self._print_error_plain_or_json('File is a thin archive and cannot be decompiled.')
-            return 1
+        try:
+            # Check for thin archives.
+            if utils.has_thin_archive_signature(self.library_path):
+                self._print_error_plain_or_json('File is a thin archive and cannot be decompiled.')
+                return 1
 
-        # Check if file is archive
-        if not utils.is_valid_archive(self.library_path):
-            self._print_error_plain_or_json('File is not supported archive or is not readable.')
-            return 1
+            # Check if file is archive
+            if not utils.is_valid_archive(self.library_path):
+                self._print_error_plain_or_json('File is not supported archive or is not readable.')
+                return 1
 
-        # Check number of files.
-        self.file_count = utils.archive_object_count(self.library_path)
+            # Check number of files.
+            self.file_count = utils.archive_object_count(self.library_path)
 
-        if self.file_count <= 0:
-            self._print_error_plain_or_json('No files found in archive.')
-            return 1
+            if self.file_count <= 0:
+                self._print_error_plain_or_json('No files found in archive.')
+                return 1
 
-        # List only mode.
-        if self.enable_list_mode:
-            if self.use_json_format:
-                utils.archive_list_numbered_content_json(self.library_path)
-            else:
-                utils.archive_list_numbered_content(self.library_path)
+            # List only mode.
+            if self.enable_list_mode:
+                if self.use_json_format:
+                    utils.archive_list_numbered_content_json(self.library_path)
+                else:
+                    utils.archive_list_numbered_content(self.library_path)
 
-            self._cleanup()
-            return 0
+                return 0
 
-        # Run the decompilation over all the found files.
-        print('Running `%s' % DECOMPILER, end='')
+            # Run the decompilation over all the found files.
+            print('Running `%s' % DECOMPILER, end='')
 
-        if self.decompiler_args:
-            print(' ' + ' '.join(self.decompiler_args), end='')
-
-        print('` over %d files with timeout %d s. (run `kill %d ` to terminate this script)...' % (
-            self.file_count, self.timeout, os.getpid()), file=sys.stderr)
-
-        for i in range(self.file_count):
-            file_index = (i + 1)
-            print('%d/%d\t\t' % (file_index, self.file_count))
-
-            # We have to use indexes instead of names because archives can contain multiple files with same name.
-            log_file = self.library_path + '.file_' + str(file_index) + '.log.verbose'
-
-            # Do not escape!
-            arg_list = [
-                DECOMPILER,
-                '--ar-index=' + str(i),
-                '-o', self.library_path + '.file_' + str(file_index) + '.c',
-                self.library_path,
-            ]
             if self.decompiler_args:
-                arg_list.extend(self.decompiler_args)
-            output, rc, timeouted = CmdRunner.run_cmd(
-                arg_list,
-                timeout=self.timeout,
-                buffer_output=True,
-            )
+                print(' ' + ' '.join(self.decompiler_args), end='')
 
-            with open(log_file, 'w') as f:
-                f.write(output)
+            print('` over %d files with timeout %d s. (run `kill %d ` to terminate this script)...' % (
+                self.file_count, self.timeout, os.getpid()), file=sys.stderr)
 
-            if timeouted:
-                print('[TIMEOUT]')
-            elif rc != 0:
-                print('[FAIL]')
-            else:
-                print('[OK]')
+            failed = False
+            for i in range(self.file_count):
+                file_index = (i + 1)
+                print('%d/%d\t\t' % (file_index, self.file_count))
 
-        self._cleanup()
-        return 0
+                # We have to use indexes instead of names because archives can contain multiple files with same name.
+                log_file = self.library_path + '.file_' + str(file_index) + '.log.verbose'
+
+                # Do not escape!
+                arg_list = [
+                    DECOMPILER,
+                    '--ar-index=' + str(i),
+                    '-o', self.library_path + '.file_' + str(file_index) + '.c',
+                    self.library_path,
+                ]
+                if self.decompiler_args:
+                    arg_list.extend(self.decompiler_args)
+                output, rc, timeouted = CmdRunner.run_cmd(
+                    arg_list,
+                    timeout=self.timeout,
+                    buffer_output=True,
+                )
+
+                with open(log_file, 'w') as f:
+                    f.write(output)
+
+                if timeouted:
+                    print('[TIMEOUT]')
+                    failed = True
+                elif rc != 0:
+                    print('[FAIL]')
+                    failed = True
+                else:
+                    print('[OK]')
+
+            return 1 if failed else 0
+        finally:
+            self._cleanup()
 
 
 if __name__ == '__main__':
