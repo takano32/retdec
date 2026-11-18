@@ -305,7 +305,8 @@ def ensure_script_is_being_run_from_installed_retdec():
     # Use this function to assist our users when they try to run the scripts
     # from the 'retdec/scripts' directory instead of from an installed RetDec.
     # See https://github.com/avast/retdec/issues/418
-    if not os.path.dirname(__file__).endswith('bin'):
+    parent_dir = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+    if (parent_dir.lower() if is_windows() else parent_dir) != 'bin':
         print_error_and_die(
             'You need to build and install RetDec first and then run the installed script '
             'from `$RETDEC_INSTALL_DIR/bin`.\n'
