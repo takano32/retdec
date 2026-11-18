@@ -125,6 +125,11 @@ void double10ToDouble8(std::vector<unsigned char> &dest,
 */
 void double8ToDouble10(std::vector<unsigned char> &dest,
 		const std::vector<unsigned char> &src) {
+	if (src.size() < 8) {
+		dest.clear();
+		return;
+	}
+
 	std::array<unsigned char, 10> result{};
 
 	std::uint64_t bits = 0;

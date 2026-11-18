@@ -4,6 +4,11 @@
 * @copyright (c) 2017 Avast Software, licensed under the MIT license
 */
 
+#include <cfloat>
+#include <cmath>
+#include <cstring>
+#include <limits>
+
 #include <gtest/gtest.h>
 
 #include "retdec/utils/conversion.h"
@@ -206,6 +211,129 @@ double10ToDouble8Success) {
 	double10ToDouble8(dest, src);
 
 	EXPECT_TRUE(dest == ok);
+}
+
+//
+// double8ToDouble10()
+//
+
+namespace {
+
+std::vector<unsigned char> doubleToBytes(double val) {
+	std::vector<unsigned char> bytes(8);
+	std::memcpy(bytes.data(), &val, bytes.size());
+	return bytes;
+}
+
+double bytesToDouble(const std::vector<unsigned char> &bytes) {
+	double val = 0.0;
+	std::memcpy(&val, bytes.data(), 8);
+	return val;
+}
+
+std::vector<unsigned char> expectedNative80BitBytes(double val) {
+	long double ld = static_cast<long double>(val);
+	std::vector<unsigned char> bytes(10);
+	std::memcpy(bytes.data(), &ld, bytes.size());
+	return bytes;
+}
+
+} // namespace
+
+TEST_F(ConversionTests,
+double8ToDouble10Success) {
+	std::vector<unsigned char> dest;
+	// 64-bit IEEE-754 double for 3.789 (matches double10ToDouble8Success).
+	std::vector<unsigned char> src = {0x1c, 0x5a, 0x64, 0x3b, 0xdf, 0x4f, 0x0e, 0x40};
+	std::vector<unsigned char> expected = {0x00, 0xe0, 0xd0, 0x22, 0xdb, 0xf9, 0x7e, 0xf2, 0x00, 0x40};
+
+	double8ToDouble10(dest, src);
+	EXPECT_EQ(expected, dest);
+
+	std::vector<unsigned char> roundTrip;
+	double10ToDouble8(roundTrip, dest);
+	EXPECT_EQ(src, roundTrip);
+}
+
+TEST_F(ConversionTests,
+double8ToDouble10SpecialValuesAndRoundTrip) {
+	const double values[] = {
+		0.0,
+		-0.0,
+		1.0,
+		-1.0,
+		0.31348419189453125,
+		-123456.789012345,
+		std::numeric_limits<double>::min(),
+		std::numeric_limits<double>::max(),
+		std::numeric_limits<double>::infinity(),
+		-std::numeric_limits<double>::infinity(),
+	};
+
+	for (double v : values) {
+		std::vector<unsigned char> d8 = doubleToBytes(v);
+		std::vector<unsigned char> d10;
+		double8ToDouble10(d10, d8);
+		ASSERT_EQ(10u, d10.size());
+
+		if (sizeof(long double) >= 10 && LDBL_MANT_DIG == 64 && LDBL_MAX_EXP == 16384) {
+			EXPECT_EQ(expectedNative80BitBytes(v), d10);
+		}
+
+		std::vector<unsigned char> roundTrip;
+		double10ToDouble8(roundTrip, d10);
+		EXPECT_EQ(d8, roundTrip);
+	}
+
+	// Quiet NaN (positive and negative)
+	for (double qnan : {std::numeric_limits<double>::quiet_NaN(), -std::numeric_limits<double>::quiet_NaN()}) {
+		std::vector<unsigned char> d8 = doubleToBytes(qnan);
+		std::vector<unsigned char> d10;
+		double8ToDouble10(d10, d8);
+		ASSERT_EQ(10u, d10.size());
+		EXPECT_EQ(0xc0, d10[7] & 0xc0);
+		EXPECT_EQ(0xff, d10[8]);
+		EXPECT_EQ(std::signbit(qnan) ? 0xff : 0x7f, d10[9]);
+
+		std::vector<unsigned char> roundTrip;
+		double10ToDouble8(roundTrip, d10);
+		EXPECT_TRUE(std::isnan(bytesToDouble(roundTrip)));
+	}
+}
+
+TEST_F(ConversionTests,
+double8ToDouble10SubnormalValues) {
+	const double subnormals[] = {
+		std::numeric_limits<double>::denorm_min(),
+		std::numeric_limits<double>::denorm_min() * 42.0,
+		-std::numeric_limits<double>::denorm_min(),
+	};
+
+	// Smallest positive subnormal double (2^-1074) has x87 exponent 16383 - 1074 = 15309 (0x3bcd)
+	std::vector<unsigned char> expectedMin = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0xcd, 0x3b};
+	std::vector<unsigned char> out;
+	double8ToDouble10(out, doubleToBytes(subnormals[0]));
+	EXPECT_EQ(expectedMin, out);
+
+	if (sizeof(long double) >= 10 && LDBL_MANT_DIG == 64 && LDBL_MAX_EXP == 16384) {
+		for (double v : subnormals) {
+			std::vector<unsigned char> d10;
+			double8ToDouble10(d10, doubleToBytes(v));
+			EXPECT_EQ(expectedNative80BitBytes(v), d10);
+		}
+	}
+}
+
+TEST_F(ConversionTests,
+double8ToDouble10AliasingAndShortInput) {
+	std::vector<unsigned char> buf = doubleToBytes(0.31348419189453125);
+	std::vector<unsigned char> expected = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x81, 0xA0, 0xFD, 0x3F};
+	double8ToDouble10(buf, buf);
+	EXPECT_EQ(expected, buf);
+
+	std::vector<unsigned char> shortInput = {0x01, 0x02, 0x03};
+	double8ToDouble10(buf, shortInput);
+	EXPECT_TRUE(buf.empty());
 }
 
 //

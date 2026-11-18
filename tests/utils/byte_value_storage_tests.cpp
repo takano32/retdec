@@ -358,6 +358,26 @@ Get10ByteWorks) {
 }
 
 TEST_F(ByteValueStorageTests,
+Set10ByteWorks) {
+	MockByteValueStorage storage;
+
+	std::uint64_t address = 0x100;
+	std::vector<std::uint8_t> expected = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x81, 0xA0, 0xFD, 0x3F};
+
+	EXPECT_CALL(storage, setXBytes(address, expected))
+		.Times(1)
+		.WillOnce(Return(true));
+
+	EXPECT_TRUE(storage.set10Byte(address, 0.31348419189453125L));
+
+	EXPECT_CALL(storage, setXBytes(address, _))
+		.Times(1)
+		.WillOnce(Return(false));
+
+	EXPECT_FALSE(storage.set10Byte(address, 1.0L));
+}
+
+TEST_F(ByteValueStorageTests,
 GetWordWorks) {
 	MockByteValueStorage storage;
 
