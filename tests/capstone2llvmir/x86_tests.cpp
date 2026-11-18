@@ -4589,6 +4589,87 @@ TEST_P(Capstone2LlvmIrTranslatorX86Tests, X86_INS_SBB_eax_eax_cf_true)
 	EXPECT_NO_VALUE_CALLED();
 }
 
+// https://github.com/avast/retdec/issues/1196
+TEST_P(Capstone2LlvmIrTranslatorX86Tests, X86_INS_SBB_af_nibble_wraparound)
+{
+	SKIP_MODE_16;
+
+	setRegisters({
+		{X86_REG_EAX, 0x1235},
+		{X86_REG_EBX, 0x56f},
+		{X86_REG_CF, true}
+	});
+
+	emulate("sbb eax, ebx");
+
+	EXPECT_JUST_REGISTERS_LOADED({X86_REG_EAX, X86_REG_EBX, X86_REG_CF});
+	EXPECT_JUST_REGISTERS_STORED({
+		{X86_REG_EAX, 0x1235 - (0x56f + 0x1)},
+		{X86_REG_CF, ANY},
+		{X86_REG_OF, ANY},
+		{X86_REG_ZF, ANY},
+		{X86_REG_SF, ANY},
+		{X86_REG_PF, ANY},
+		{X86_REG_AF, true}, // 0x5 < 0xf + 1 => borrow from bit 3 (fails if op1+cf wraps low nibble)
+	});
+	EXPECT_NO_MEMORY_LOADED_STORED();
+	EXPECT_NO_VALUE_CALLED();
+}
+
+// https://github.com/avast/retdec/issues/1196
+TEST_P(Capstone2LlvmIrTranslatorX86Tests, X86_INS_SBB_af_boundary_false)
+{
+	SKIP_MODE_16;
+
+	setRegisters({
+		{X86_REG_EAX, 0x1235},
+		{X86_REG_EBX, 0x564},
+		{X86_REG_CF, true}
+	});
+
+	emulate("sbb eax, ebx");
+
+	EXPECT_JUST_REGISTERS_LOADED({X86_REG_EAX, X86_REG_EBX, X86_REG_CF});
+	EXPECT_JUST_REGISTERS_STORED({
+		{X86_REG_EAX, 0x1235 - (0x564 + 0x1)},
+		{X86_REG_CF, ANY},
+		{X86_REG_OF, ANY},
+		{X86_REG_ZF, ANY},
+		{X86_REG_SF, ANY},
+		{X86_REG_PF, ANY},
+		{X86_REG_AF, false}, // 0x5 < 0x4 + 1 is false => no borrow from bit 3
+	});
+	EXPECT_NO_MEMORY_LOADED_STORED();
+	EXPECT_NO_VALUE_CALLED();
+}
+
+// https://github.com/avast/retdec/issues/1196
+TEST_P(Capstone2LlvmIrTranslatorX86Tests, X86_INS_SBB_r8_af_max_borrow)
+{
+	ALL_MODES;
+
+	setRegisters({
+		{X86_REG_AL, 0x00},
+		{X86_REG_BL, 0x0f},
+		{X86_REG_CF, true}
+	});
+
+	emulate("sbb al, bl");
+
+	EXPECT_JUST_REGISTERS_LOADED({X86_REG_AL, X86_REG_BL, X86_REG_CF});
+	EXPECT_JUST_REGISTERS_STORED({
+		{X86_REG_AL, 0xf0},
+		{X86_REG_CF, ANY},
+		{X86_REG_OF, ANY},
+		{X86_REG_ZF, ANY},
+		{X86_REG_SF, ANY},
+		{X86_REG_PF, ANY},
+		{X86_REG_AF, true}, // 0x0 < 0xf + 1 => max 4-bit borrow on 8-bit operand
+	});
+	EXPECT_NO_MEMORY_LOADED_STORED();
+	EXPECT_NO_VALUE_CALLED();
+}
+
 //
 // X86_INS_SHL
 //
