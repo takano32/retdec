@@ -25,7 +25,7 @@ EXTRACT = os.path.join(SCRIPT_DIR, 'retdec-macho-extractor')
 
 if sys.platform == "darwin":
     # mac os x need the `gnu-time´ package
-    LOG_TIME = ['/usr/local/bin/gtime', '-v']
+    LOG_TIME = [shutil.which('gtime') or '/usr/local/bin/gtime', '-v']
 else:
     LOG_TIME = ['/usr/bin/time', '-v']
 
