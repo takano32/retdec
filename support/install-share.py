@@ -74,16 +74,16 @@ def main():
 
     # Unpack archive.
     print('Unpacking archive ...')
-    with tarfile.open(arch_path) as tar:
-        try:
+    try:
+        with tarfile.open(arch_path) as tar:
             if hasattr(tarfile, 'data_filter'):
                 tar.extractall(support_dir, filter='data')
             else:
                 tar.extractall(support_dir)
-        except tarfile.TarError as ex:
-            print('ERROR: failed to unpack the archive', ex)
-            cleanup(support_dir)
-            sys.exit(1)
+    except tarfile.TarError as ex:
+        print('ERROR: failed to unpack the archive', ex)
+        cleanup(support_dir)
+        sys.exit(1)
 
     # Remove archive.
     os.remove(arch_path)
